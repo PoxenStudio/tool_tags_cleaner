@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>标签清理</title>
+  <link rel="stylesheet" href="lib/theme.css" />
+  <style>
+    section { margin-bottom: 28px; }
+    section > h2 { font-size: 1.05em; margin-bottom: 12px; }
+    .rule-card { margin-bottom: 10px; }
+    .rule-card__title { font-weight: 500; margin-bottom: 4px; }
+    .rule-card__desc { font-size: 0.92em; }
+    .rule-card__examples { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .stat-grid { display: flex; flex-wrap: wrap; gap: 24px; margin: 14px 0; }
+    .stat-item { min-width: 88px; }
+    .stat-item__value { font-size: 1.5em; font-weight: 600; }
+    .stat-item__label { font-size: 0.85em; }
+    .progress-wrap { margin: 14px 0; }
+    .progress-label { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 6px; }
+    .error-sample { font-size: 0.88em; padding: 4px 0; }
+  </style>
+</head>
+<body>
+  <div class="mb-container">
+    <h1 data-i18n="app.title">标签清理</h1>
+    <p class="mb-text-secondary" data-i18n="app.subtitle">遍历书库中所有书籍，按下面这组规则清理无效标签。</p>
+
+    <section>
+      <h2 data-i18n="rules.title">清理规则</h2>
+      <div id="rules-loading" class="mb-text-secondary" data-i18n="rules.loading">加载规则中...</div>
+      <div id="rules-error" class="mb-alert mb-alert--error" hidden></div>
+      <div id="rules-list"></div>
+    </section>
+
+    <section>
+      <h2 data-i18n="task.title">开始清理</h2>
+
+      <div id="start-error-alert" class="mb-alert mb-alert--error" hidden></div>
+
+      <div class="mb-row mb-row--center">
+        <button id="start-btn" class="mb-btn" data-i18n="action.start">开始清理</button>
+        <button id="cancel-btn" class="mb-btn mb-btn--secondary" data-i18n="action.cancel" hidden disabled>取消</button>
+        <span id="task-spinner" class="mb-spinner" hidden></span>
+      </div>
+
+      <div id="task-panel" hidden>
+        <div class="progress-wrap">
+          <div class="progress-label">
+            <span id="progress-status-text"></span>
+            <span id="progress-pct-text"></span>
+          </div>
+          <div class="mb-progress-linear">
+            <div id="progress-bar" class="mb-progress-linear__bar"></div>
+          </div>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat-item">
+            <div id="stat-total" class="stat-item__value">0</div>
+            <div class="stat-item__label" data-i18n="stat.total">总数</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-changed" class="stat-item__value mb-status--success">0</div>
+            <div class="stat-item__label" data-i18n="stat.changed">已清理</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-unchanged" class="stat-item__value">0</div>
+            <div class="stat-item__label" data-i18n="stat.unchanged">未改动</div>
+          </div>
+          <div class="stat-item">
+            <div id="stat-errors" class="stat-item__value mb-status--error">0</div>
+            <div class="stat-item__label" data-i18n="stat.errors">失败</div>
+          </div>
+        </div>
+
+        <p id="current-book" class="mb-text-secondary"></p>
+
+        <div id="task-error-alert" class="mb-alert mb-alert--error" hidden></div>
+        <div id="error-samples" hidden>
+          <div class="mb-text-secondary" data-i18n="stat.errorSamples">部分失败示例：</div>
+          <div id="error-samples-list"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/static/toolbox-bridge.js"></script>
+  <script src="lib/i18n.js"></script>
+  <script>
+    var bridge = window.MyBooksToolBridge;
+    var i18n = window.MyBooksToolI18n.create();
+
+    function $(id) { return document.getElementById(id); }
+
+    function applyTheme(theme) {
+      document.body.setAttribute('data-theme', theme);
+    }
+    applyTheme(bridge.theme);
+    bridge.onThemeChange(applyTheme);
+
+    function showAlert(el, text) {
+      el.textContent = text;
+      el.hidden = false;
+    }
+    function hideAlert(el) {
+      el.hidden = true;
+      el.textContent = '';
+    }
+
+    // ---------- 规则展示 ----------
+
+    function renderRules(rules) {
+      var list = $('rules-list');
+      list.innerHTML = '';
+      (rules || []).forEach(function (rule) {
+        var card = document.createElement('div');
+        card.className = 'mb-card rule-card';
+
+        var title = document.createElement('div');
+        title.className = 'rule-card__title';
+        title.textContent = rule.title;
+        card.appendChild(title);
+
+        var desc = document.createElement('div');
+        desc.className = 'rule-card__desc mb-text-secondary';
+        desc.textContent = rule.description;
+        card.appendChild(desc);
+
+        if (rule.examples && rule.examples.length) {
+          var examples = document.createElement('div');
+          examples.className = 'rule-card__examples';
+          rule.examples.forEach(function (ex) {
+            var chip = document.createElement('span');
+            chip.className = 'mb-chip';
+            chip.textContent = ex;
+            examples.appendChild(chip);
+          });
+          card.appendChild(examples);
+        }
+
+        list.appendChild(card);
+      });
+    }
+
+    function loadRules() {
+      bridge.fetch('rules').then(function (resp) {
+        $('rules-loading').hidden = true;
+        if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
+        renderRules(resp.data);
+      }).catch(function (err) {
+        $('rules-loading').hidden = true;
+        showAlert($('rules-error'), i18n.t('rules.loadFailed', { error: err.message || err }));
+      });
+    }
+
+    // ---------- 任务状态 ----------
+
+    var state = { pollTimer: null };
+
+    function startPolling() {
+      if (state.pollTimer) return;
+      state.pollTimer = setInterval(refreshStatus, 1000);
+    }
+    function stopPolling() {
+      if (state.pollTimer) {
+        clearInterval(state.pollTimer);
+        state.pollTimer = null;
+      }
+    }
+
+    function refreshStatus() {
+      return bridge.fetch('status').then(function (resp) {
+        if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
+        renderStatus(resp.data);
+      }).catch(function () { /* 静默失败，下一轮再试 */ });
+    }
+
+    function renderStatus(job) {
+      job = job || { status: 'idle' };
+      var running = job.status === 'running';
+      var cancelling = running && job.cancel_requested;
+
+      $('start-btn').disabled = running;
+      $('cancel-btn').hidden = !running;
+      $('cancel-btn').disabled = !running || cancelling;
+      $('cancel-btn').textContent = i18n.t(cancelling ? 'action.cancelling' : 'action.cancel');
+      $('task-spinner').hidden = !running;
+
+      if (job.status === 'idle') {
+        $('task-panel').hidden = true;
+        stopPolling();
+        return;
+      }
+
+      $('task-panel').hidden = false;
+      var total = job.total || 0;
+      var processed = job.processed || 0;
+      var pct = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+      $('progress-bar').style.width = pct + '%';
+      $('progress-pct-text').textContent = processed + ' / ' + total;
+      $('progress-status-text').textContent = i18n.t('task.status.' + job.status);
+
+      $('stat-total').textContent = total;
+      $('stat-changed').textContent = job.changed || 0;
+      $('stat-unchanged').textContent = job.unchanged || 0;
+      $('stat-errors').textContent = job.errors || 0;
+
+      $('current-book').textContent = (running && job.current_book)
+        ? i18n.t('task.currentBook', { title: job.current_book })
+        : '';
+
+      var errorAlert = $('task-error-alert');
+      if (job.status === 'failed' && job.error) {
+        errorAlert.hidden = false;
+        errorAlert.textContent = i18n.t('task.error', { error: job.error });
+      } else {
+        errorAlert.hidden = true;
+      }
+
+      var samplesWrap = $('error-samples');
+      var samplesList = $('error-samples-list');
+      if (job.error_samples && job.error_samples.length) {
+        samplesWrap.hidden = false;
+        samplesList.innerHTML = '';
+        job.error_samples.forEach(function (sample) {
+          var row = document.createElement('div');
+          row.className = 'error-sample mb-text-secondary';
+          row.textContent = 'book_id=' + sample.book_id + '：' + sample.error;
+          samplesList.appendChild(row);
+        });
+      } else {
+        samplesWrap.hidden = true;
+      }
+
+      if (running) {
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    }
+
+    // ---------- 启动 / 取消 ----------
+
+    function startCleaning() {
+      hideAlert($('start-error-alert'));
+      $('start-btn').disabled = true;
+      bridge.fetch('start', { method: 'POST' }).then(function (resp) {
+        if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
+        renderStatus(resp.data);
+      }).catch(function (err) {
+        $('start-btn').disabled = false;
+        showAlert($('start-error-alert'), i18n.t('start.failed', { error: err.message || err }));
+      });
+    }
+    $('start-btn').addEventListener('click', startCleaning);
+
+    function cancelCleaning() {
+      var btn = $('cancel-btn');
+      btn.disabled = true;
+      btn.textContent = i18n.t('action.cancelling');
+      bridge.fetch('cancel', { method: 'POST' }).then(function (resp) {
+        if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
+        renderStatus(resp.data);
+      }).catch(function (err) {
+        bridge.notify(i18n.t('task.error', { error: err.message || err }), 'error');
+      });
+    }
+    $('cancel-btn').addEventListener('click', cancelCleaning);
+
+    // ---------- 启动入口 ----------
+
+    i18n.ready.then(function () {
+      loadRules();
+      refreshStatus();
+    });
+    i18n.onChange(function () {
+      bridge.fetch('status').then(function (resp) {
+        if (resp.err === 'ok') renderStatus(resp.data);
+      }).catch(function () {});
+    });
+  </script>
+</body>
+</html>

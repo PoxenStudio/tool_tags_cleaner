@@ -1,0 +1,28 @@
+{
+  "app.title": "标签清理",
+  "app.subtitle": "遍历书库中所有书籍，按下面这组规则清理无效标签。",
+
+  "rules.title": "清理规则",
+  "rules.loading": "加载规则中...",
+  "rules.loadFailed": "规则加载失败：{error}",
+
+  "task.title": "开始清理",
+  "task.status.running": "正在处理...",
+  "task.status.completed": "清理完成",
+  "task.status.failed": "清理失败",
+  "task.status.cancelled": "已取消",
+  "task.currentBook": "正在处理：{title}",
+  "task.error": "出错了：{error}",
+
+  "stat.total": "总数",
+  "stat.changed": "已清理",
+  "stat.unchanged": "未改动",
+  "stat.errors": "失败",
+  "stat.errorSamples": "部分失败示例：",
+
+  "action.start": "开始清理",
+  "action.cancel": "取消",
+  "action.cancelling": "取消中...",
+
+  "start.failed": "启动失败：{error}"
+}

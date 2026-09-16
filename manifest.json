@@ -1,0 +1,21 @@
+{
+  "tool_id": "tags_cleaner",
+  "name": "标签清理",
+  "description": "使用基础规则清理书库中无效的标签",
+  "revision": "0.1.0",
+  "author": "PoxenStudio",
+  "publish_date": "2026-09-16",
+  "core_api_version": "1.2.0",
+  "entry_backend": "tool.TagsCleaner",
+  "entry_frontend": "index.html",
+  "page": "tags_cleaner",
+  "repo_url": "https://github.com/PoxenStudio/tool_tags_cleaner",
+  "locales": ["zh"],
+  "default_locale": "zh",
+  "api_routes": [
+    { "path": "rules", "handler": "tool.RulesHandler" },
+    { "path": "status", "handler": "tool.StatusHandler" },
+    { "path": "start", "handler": "tool.StartHandler" },
+    { "path": "cancel", "handler": "tool.CancelHandler" }
+  ]
+}
