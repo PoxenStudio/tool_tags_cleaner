@@ -1,7 +1,7 @@
 {
   "tool_id": "tags_cleaner",
   "name": "标签清理",
-  "description": "使用基础规则清理书库中无效的标签",
+  "description": "使用基础规则清理书库中无效的标签, 包括广告名称、工具名称、网址等标签",
   "revision": "0.1.0",
   "author": "PoxenStudio",
   "publish_date": "2026-09-16",
