@@ -18,6 +18,8 @@
     .progress-wrap { margin: 14px 0; }
     .progress-label { display: flex; justify-content: space-between; font-size: 0.9em; margin-bottom: 6px; }
     .error-sample { font-size: 0.88em; padding: 4px 0; }
+    .option-row { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .option-row input { width: 96px; }
   </style>
 </head>
 <body>
@@ -33,6 +35,12 @@
 
     <section>
       <h2 data-i18n="task.title">开始清理</h2>
+
+      <div class="option-row">
+        <label for="rare-tag-count" data-i18n="option.rareTagCount">清理关联书籍数不超过此值的标签</label>
+        <input id="rare-tag-count" class="mb-input" type="number" min="0" max="3" step="1" value="0" />
+      </div>
+      <p id="rare-tag-hint" class="mb-text-secondary">0 表示不按关联书籍数筛选。</p>
 
       <div id="start-error-alert" class="mb-alert mb-alert--error" hidden></div>
 
@@ -156,6 +164,24 @@
 
     var state = { pollTimer: null };
 
+    function loadLimits() {
+      bridge.fetch('limits').then(function (resp) {
+        if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
+        var limits = resp.data || {};
+        var max = Number(limits.max_rare_tag_count);
+        if (!Number.isInteger(max) || max < 1 || max > 3) max = 3;
+        $('rare-tag-count').max = String(max);
+        $('rare-tag-count').value = Math.min(Number($('rare-tag-count').value) || 0, max);
+        var bookCount = Number(limits.book_count);
+        $('rare-tag-hint').textContent = Number.isFinite(bookCount)
+          ? i18n.t('option.rareTagHint', { max: max, bookCount: bookCount })
+          : i18n.t('option.rareTagHintNoCount', { max: max });
+      }).catch(function () {
+        $('rare-tag-count').max = '3';
+        $('rare-tag-hint').textContent = i18n.t('option.rareTagHintNoCount', { max: 3 });
+      });
+    }
+
     function startPolling() {
       if (state.pollTimer) return;
       state.pollTimer = setInterval(refreshStatus, 1000);
@@ -180,6 +206,7 @@
       var cancelling = running && job.cancel_requested;
 
       $('start-btn').disabled = running;
+      $('rare-tag-count').disabled = running;
       $('cancel-btn').hidden = !running;
       $('cancel-btn').disabled = !running || cancelling;
       $('cancel-btn').textContent = i18n.t(cancelling ? 'action.cancelling' : 'action.cancel');
@@ -194,10 +221,27 @@
       $('task-panel').hidden = false;
       var total = job.total || 0;
       var processed = job.processed || 0;
-      var pct = total ? Math.min(100, Math.round((processed / total) * 100)) : 0;
+      var scanning = running && job.phase === 'scanning';
+      // target_total 为 0 是合法值（没有需要处理的书籍），不能退回 total
+      var phaseTotal = scanning ? (job.scan_total || 0)
+        : (typeof job.target_total === 'number' ? job.target_total : total);
+      var phaseProcessed = scanning ? (job.scanned || 0) : processed;
+      var pct;
+      if (scanning) {
+        pct = phaseTotal ? Math.round((phaseProcessed / phaseTotal) * 50) : 0;
+      } else if (job.status === 'completed') {
+        pct = 100;
+      } else {
+        var base = job.rare_tag_count ? 50 : 0;
+        pct = phaseTotal
+          ? base + Math.round((phaseProcessed / phaseTotal) * (100 - base))
+          : 100;
+      }
       $('progress-bar').style.width = pct + '%';
-      $('progress-pct-text').textContent = processed + ' / ' + total;
-      $('progress-status-text').textContent = i18n.t('task.status.' + job.status);
+      $('progress-pct-text').textContent = phaseProcessed + ' / ' + phaseTotal;
+      $('progress-status-text').textContent = i18n.t(
+        running ? 'task.phase.' + (scanning ? 'scanning' : 'cleaning') : 'task.status.' + job.status
+      );
 
       $('stat-total').textContent = total;
       $('stat-changed').textContent = job.changed || 0;
@@ -243,7 +287,17 @@
     function startCleaning() {
       hideAlert($('start-error-alert'));
       $('start-btn').disabled = true;
-      bridge.fetch('start', { method: 'POST' }).then(function (resp) {
+      var max = Number($('rare-tag-count').max);
+      if (!Number.isInteger(max) || max < 1 || max > 3) max = 3;
+      var rareTagCount = Math.min(
+        Math.max(0, Math.floor(Number($('rare-tag-count').value) || 0)), max
+      );
+      $('rare-tag-count').value = String(rareTagCount);
+      bridge.fetch('start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rare_tag_count: rareTagCount }),
+      }).then(function (resp) {
         if (resp.err !== 'ok') throw new Error(resp.msg || resp.err);
         renderStatus(resp.data);
       }).catch(function (err) {
@@ -269,10 +323,12 @@
     // ---------- 启动入口 ----------
 
     i18n.ready.then(function () {
+      loadLimits();
       loadRules();
       refreshStatus();
     });
     i18n.onChange(function () {
+      loadLimits();
       bridge.fetch('status').then(function (resp) {
         if (resp.err === 'ok') renderStatus(resp.data);
       }).catch(function () {});

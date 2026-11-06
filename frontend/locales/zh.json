@@ -8,6 +8,8 @@
 
   "task.title": "开始清理",
   "task.status.running": "正在处理...",
+  "task.phase.scanning": "正在统计标签关联书籍...",
+  "task.phase.cleaning": "正在清理书籍标签...",
   "task.status.completed": "清理完成",
   "task.status.failed": "清理失败",
   "task.status.cancelled": "已取消",
@@ -23,6 +25,10 @@
   "action.start": "开始清理",
   "action.cancel": "取消",
   "action.cancelling": "取消中...",
+
+  "option.rareTagCount": "清理关联书籍数不超过此值的标签",
+  "option.rareTagHint": "0 表示不按关联书籍数筛选；当前书库 {bookCount} 本，该值最大为 {max}。",
+  "option.rareTagHintNoCount": "0 表示不按关联书籍数筛选；该值最大为 {max}。",
 
   "start.failed": "启动失败：{error}"
 }

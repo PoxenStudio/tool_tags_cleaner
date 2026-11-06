@@ -6,12 +6,12 @@ from typing import List
 
 # 无效 tag：开头为这些词（不区分大小写）
 _INVALID_TAG_PREFIX = re.compile(
-    r'^(?:关注|标题|制作|下载|出版社|http|ftp|mail|isbn)', re.IGNORECASE
+    r'^(?:关注|标题|制作|下载|出版社|http|ftp|mail|isbn|\+vx:)', re.IGNORECASE
 )
 
 # 无效 tag：含有这些内容（不区分大小写）
 _INVALID_TAG_CONTAINS = re.compile(
-    r'(?:\s|公众号|微信|下载|下載|汇书网|书屋|，|www\.|\.com|出品|@|商务印书馆|SANQIU)', re.IGNORECASE
+    r'(?:\s|公众号|微信|下载|下載|汇书网|书屋|，|www\.|\.com|出品|@|商务印书馆|SANQIU|电子书)', re.IGNORECASE
 )
 
 # 无效 tag：结尾为这些词
@@ -32,14 +32,14 @@ RULES = [
         "id": "prefix",
         "title": "广告类前缀",
         "description": "标签以「关注」「标题」「制作」「下载」「出版社」「http」「ftp」「mail」"
-                        "「isbn」开头（不区分大小写）",
-        "examples": ["关注公众号", "http://example.com", "ISBN 978-x"],
+                        "「isbn」「+vx:」开头（不区分大小写）",
+        "examples": ["关注公众号", "http://example.com", "ISBN 978-x", "+vx:abc"],
     },
     {
         "id": "contains",
         "title": "广告/网址类关键词",
         "description": "标签中含空白字符、「公众号」「微信」「，」「www.」「.com」「出品」「@」"
-                        "「商务印书馆」「SANQIU」（不区分大小写）",
+                        "「商务印书馆」「SANQIU」「电子书」（不区分大小写）",
         "examples": ["加微信xxx", "www.example.com", "联系邮箱a@b.com"],
     },
     {

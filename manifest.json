@@ -2,10 +2,10 @@
   "tool_id": "tags_cleaner",
   "name": "标签清理",
   "description": "使用基础规则清理书库中无效的标签, 包括广告名称、工具名称、网址等标签",
-  "revision": "0.1.0",
+  "revision": "0.2.0",
   "author": "PoxenStudio",
-  "publish_date": "2026-09-16",
-  "core_api_version": "1.2.0",
+  "publish_date": "2026-11-08",
+  "core_api_version": "1.5.0",
   "entry_backend": "tool.TagsCleaner",
   "entry_frontend": "index.html",
   "page": "tags_cleaner",
@@ -14,6 +14,7 @@
   "default_locale": "zh",
   "api_routes": [
     { "path": "rules", "handler": "tool.RulesHandler" },
+    { "path": "limits", "handler": "tool.LimitsHandler" },
     { "path": "status", "handler": "tool.StatusHandler" },
     { "path": "start", "handler": "tool.StartHandler" },
     { "path": "cancel", "handler": "tool.CancelHandler" }

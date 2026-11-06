@@ -156,6 +156,11 @@ def empty_stats() -> dict:
     return {
         "total": 0,
         "processed": 0,
+        "target_total": 0,
+        "rare_tag_count": 0,
+        "phase": "cleaning",
+        "scanned": 0,
+        "scan_total": 0,
         "changed": 0,
         "unchanged": 0,
         "errors": 0,
@@ -171,6 +176,7 @@ def public_status(job: Optional[dict]) -> dict:
     fields = (
         "status", "total", "processed", "changed", "unchanged", "errors",
         "error_samples", "current_book", "cancel_requested", "error",
-        "started_at", "updated_at", "finished_at",
+        "started_at", "updated_at", "finished_at", "phase", "target_total",
+        "rare_tag_count", "scanned", "scan_total",
     )
     return {k: job.get(k) for k in fields if k in job}
