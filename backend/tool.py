@@ -10,8 +10,8 @@
 同时转发一份给 `self.api.tasks`，在宿主的后台任务面板里也能看到。
 
 CoreAPI 命名空间速查（详见 mybooks/mybooks `webserver/toolbox/core_api.py`）：
-    self.api.calibre   书库读写：all_book_ids / get_category_with_count / search_ids /
-                       get_metadata / set_metadata
+    self.api.calibre   书库读写：all_book_ids / get_category_with_count / get_field_map /
+                       search_ids / get_metadata / set_metadata
     self.api.tasks     后台任务：create_task / update_progress / complete_task
     self.api.storage   工具专属数据目录：get_work_dir（这里用来存 status.json）
 """
@@ -31,7 +31,12 @@ from .meta import RULES, guess_tags
 # 每处理这么多本书，或者过了这么多秒，落一次盘/推一次任务面板进度——避免逐本书都写文件
 _PROGRESS_EVERY_BOOKS = 5
 _PROGRESS_EVERY_SECONDS = 1.0
+# 按标签搜书时，一条 Calibre 搜索表达式里最多拼多少个标签
 _SEARCH_TAG_BATCH_SIZE = 50
+# 按标签搜书最多允许的批次数：要反复搜 5 批以上时，搜书本身比直接遍历书籍还慢
+_MAX_SEARCH_ROUNDS = 5
+# 遍历书籍时每批读取多少本书的 tags（批量读字段，避免逐本 get_metadata）
+_FIELD_READ_BATCH_SIZE = 500
 
 
 def _tag_search_expression(tags):
@@ -161,34 +166,55 @@ class TagsCleaner(BaseTool):
             })
 
         try:
-            candidates = set()
-            rare_tags = set()
-            if rare_tag_count:
-                stats["phase"] = "scanning"
-                categories = self.api.calibre.get_category_with_count("tag")
-                tags_to_search = set()
-                for category in categories:
-                    name = category["name"]
-                    if name is None:
-                        continue
-                    # count 为 0 的标签没有关联书籍，搜出来也改不到任何书，直接跳过
-                    if category["count"] <= 0:
-                        continue
-                    name = str(name)
-                    normalized = name.strip()
-                    if not normalized:
-                        continue
-                    if category["count"] <= rare_tag_count:
-                        rare_tags.add(normalized)
-                        tags_to_search.add(name)
-                    if guess_tags([name]) != [name]:
-                        tags_to_search.add(name)
+            # 1) 先从标签统计里整理出"需要删除的标签"，这一步不读任何书籍元数据。
+            #    get_category_with_count() 由数据库一次统计完成（3000+ 个标签也只是一条
+            #    SQL），比按标签一批批 search_ids() 去遍历书库快得多。
+            categories = self.api.calibre.get_category_with_count("tag")
+            tags_to_search = []      # 需要清理的标签原始名（命中规则 / 关联书籍数过少）
+            rare_tag_names = set()   # 关联书籍数 <= rare_tag_count 的标签（去掉首尾空白）
+            for category in categories:
+                name = category["name"]
+                count = category["count"]
+                # count 为 0 的标签没有关联书籍，删了也改不到任何书，直接跳过
+                if name is None or count <= 0:
+                    continue
+                name = str(name)
+                normalized = name.strip()
+                if not normalized:
+                    continue
+                if rare_tag_count and count <= rare_tag_count:
+                    rare_tag_names.add(normalized)
+                    tags_to_search.append(name)
+                elif guess_tags([name]) != [name]:
+                    tags_to_search.append(name)
 
-                tags_to_search = sorted(tags_to_search)
-                stats["scan_total"] = len(tags_to_search)
+            # 2) 决定处理范围。
+            #    需要删除的标签不多时，按标签分批搜出关联书籍，只处理这些书；
+            #    要搜 5 批以上时，搜书本身（每次都要扫一遍书库）比重点遍历还慢，
+            #    直接改为遍历书籍列表——按批读取 tags 字段，只对真正要改的书读写元数据。
+            tags_to_search = sorted(tags_to_search)
+            search_rounds = (
+                (len(tags_to_search) + _SEARCH_TAG_BATCH_SIZE - 1)
+                // _SEARCH_TAG_BATCH_SIZE
+            )
+            use_search = 0 < search_rounds <= _MAX_SEARCH_ROUNDS
+            stats["phase"] = "scanning" if rare_tag_count else "cleaning"
+
+            if rare_tag_count:
+                # 搜索阶段占前 50%；走遍历策略时没有搜索批次，扫描直接算作完成
+                stats["scan_total"] = (
+                    len(tags_to_search) if use_search else len(categories)
+                )
                 stats["scanned"] = 0
                 # 先落一次盘，让前端马上拿到真实的扫描总量（而不是启动时的 0）
                 flush(0, force=True)
+
+            if not tags_to_search:
+                # 没有任何需要清理的标签：整库都不会变化，直接结束
+                targets = []
+                stats["unchanged"] += total
+            elif use_search:
+                candidates = set()
                 for start in range(
                     0, len(tags_to_search), _SEARCH_TAG_BATCH_SIZE
                 ):
@@ -202,70 +228,89 @@ class TagsCleaner(BaseTool):
                         _tag_search_expression(batch)
                     ))
                     stats["scanned"] = start + len(batch)
-                    is_last = stats["scanned"] == len(tags_to_search)
-                    flush(
-                        int(stats["scanned"] * 50 / len(tags_to_search)),
-                        force=is_last,
-                    )
-
-                if stats.get("status") != job_store.STATUS_CANCELLED:
-                    book_ids = [
+                    if rare_tag_count:
+                        flush(int(stats["scanned"] * 50 / len(tags_to_search)))
+                if stats.get("status") == job_store.STATUS_CANCELLED:
+                    targets = []
+                else:
+                    targets = [
                         book_id for book_id in book_ids if book_id in candidates
                     ]
-                    stats["phase"] = "cleaning"
-                    stats["target_total"] = len(book_ids)
-                    stats["unchanged"] += total - len(candidates)
-                    stats["current_book"] = ""
-                    flush(50, force=True)
+                    stats["unchanged"] += total - len(targets)
+            else:
+                if rare_tag_count:
+                    stats["scanned"] = stats["scan_total"]
+                targets = list(book_ids)
 
             if stats.get("status") != job_store.STATUS_CANCELLED:
-                target_total = len(book_ids)
+                target_total = len(targets)
                 progress_start = 50 if rare_tag_count else 0
-                progress_span = 50 if rare_tag_count else 100
-                for idx, book_id in enumerate(book_ids, 1):
+                progress_span = 100 - progress_start
+                stats["phase"] = "cleaning"
+                stats["target_total"] = target_total
+                stats["current_book"] = ""
+                flush(progress_start, force=True)
+
+                for chunk_start in range(0, target_total, _FIELD_READ_BATCH_SIZE):
                     if store.is_cancel_requested():
                         stats["status"] = job_store.STATUS_CANCELLED
                         break
-                    try:
-                        mi = self.api.calibre.get_metadata(book_id)
-                        old_tags = list(mi.tags or [])
-                        if rare_tags:
+                    chunk = targets[
+                        chunk_start:chunk_start + _FIELD_READ_BATCH_SIZE
+                    ]
+                    # 一次读一整批书的 tags（内存缓存，不做元数据构造），
+                    # 只有确实需要改的书才去 get_metadata + set_metadata
+                    tag_map = self.api.calibre.get_field_map("tags", chunk)
+                    for book_id in chunk:
+                        if store.is_cancel_requested():
+                            stats["status"] = job_store.STATUS_CANCELLED
+                            break
+                        try:
                             old_tags = [
-                                tag for tag in old_tags
-                                if str(tag).strip() not in rare_tags
+                                str(tag) for tag in (tag_map.get(book_id) or ())
                             ]
-                        new_tags = guess_tags(old_tags)
-                        if new_tags != list(mi.tags or []):
-                            mi.set("tags", new_tags)
-                            self.api.calibre.set_metadata(
-                                book_id, mi, force_changes=True
+                            kept_tags = (
+                                [
+                                    tag for tag in old_tags
+                                    if tag.strip() not in rare_tag_names
+                                ]
+                                if rare_tag_names else old_tags
                             )
-                            stats["changed"] += 1
-                        else:
-                            stats["unchanged"] += 1
-                        stats["current_book"] = mi.title or str(book_id)
-                    except Exception as err:
-                        stats["errors"] += 1
-                        samples = stats.get("error_samples") or []
-                        if len(samples) < 5:
-                            samples.append({
-                                "book_id": book_id, "error": str(err),
-                            })
-                        stats["error_samples"] = samples
-                        logging.warning(
-                            "[tags_cleaner] Failed to clean tags for book_id=%s: %s",
-                            book_id, err,
-                        )
+                            new_tags = guess_tags(kept_tags)
+                            if new_tags != old_tags:
+                                mi = self.api.calibre.get_metadata(book_id)
+                                mi.set("tags", new_tags)
+                                self.api.calibre.set_metadata(
+                                    book_id, mi, force_changes=True
+                                )
+                                stats["changed"] += 1
+                                stats["current_book"] = mi.title or str(book_id)
+                            else:
+                                stats["unchanged"] += 1
+                        except Exception as err:
+                            stats["errors"] += 1
+                            samples = stats.get("error_samples") or []
+                            if len(samples) < 5:
+                                samples.append({
+                                    "book_id": book_id, "error": str(err),
+                                })
+                            stats["error_samples"] = samples
+                            logging.warning(
+                                "[tags_cleaner] Failed to clean tags for book_id=%s: %s",
+                                book_id, err,
+                            )
 
-                    stats["processed"] = idx
-                    is_last = (
-                        idx == target_total or idx % _PROGRESS_EVERY_BOOKS == 0
-                    )
-                    progress = (
-                        progress_start + int(idx * progress_span / target_total)
-                        if target_total else 100
-                    )
-                    flush(progress, force=is_last)
+                        stats["processed"] += 1
+                        is_last = (
+                            stats["processed"] == target_total
+                            or stats["processed"] % _PROGRESS_EVERY_BOOKS == 0
+                        )
+                        progress = (
+                            progress_start
+                            + int(stats["processed"] * progress_span / target_total)
+                            if target_total else 100
+                        )
+                        flush(progress, force=is_last)
 
                 if not target_total and rare_tag_count:
                     flush(100, force=True)

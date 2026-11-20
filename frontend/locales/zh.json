@@ -30,5 +30,6 @@
   "option.rareTagHint": "0 表示不按关联书籍数筛选；当前书库 {bookCount} 本，该值最大为 {max}。",
   "option.rareTagHintNoCount": "0 表示不按关联书籍数筛选；该值最大为 {max}。",
 
-  "start.failed": "启动失败：{error}"
+  "start.failed": "启动失败：{error}",
+  "start.confirmMessage": "标签清理操作不可逆，请确认开始进行清理？"
 }

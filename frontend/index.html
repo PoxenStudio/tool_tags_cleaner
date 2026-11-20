@@ -162,7 +162,7 @@
 
     // ---------- 任务状态 ----------
 
-    var state = { pollTimer: null };
+    var state = { pollTimer: null, confirmPending: false };
 
     function loadLimits() {
       bridge.fetch('limits').then(function (resp) {
@@ -205,7 +205,7 @@
       var running = job.status === 'running';
       var cancelling = running && job.cancel_requested;
 
-      $('start-btn').disabled = running;
+      $('start-btn').disabled = running || state.confirmPending;
       $('rare-tag-count').disabled = running;
       $('cancel-btn').hidden = !running;
       $('cancel-btn').disabled = !running || cancelling;
@@ -305,7 +305,36 @@
         showAlert($('start-error-alert'), i18n.t('start.failed', { error: err.message || err }));
       });
     }
-    $('start-btn').addEventListener('click', startCleaning);
+    // 清理会直接改写书库标签且不可撤销，先请求宿主弹一个与站内一致的确认框。
+    // confirmPending 防止确认框还没关时按钮被重复点击（连点会排队弹出多个确认框）。
+    $('start-btn').addEventListener('click', function () {
+      if (state.confirmPending) return;
+      // 兼容旧版宿主 / tool_builder 的 mock bridge：没有 confirm 能力时不打断流程，直接执行
+      if (typeof bridge.confirm !== 'function') {
+        startCleaning();
+        return;
+      }
+      state.confirmPending = true;
+      $('start-btn').disabled = true;
+      bridge.confirm({
+        title: i18n.t('task.title'),
+        message: i18n.t('start.confirmMessage'),
+        confirmText: i18n.t('action.start'),
+        cancelText: i18n.t('action.cancel'),
+        color: 'error',
+      }).then(function (ok) {
+        state.confirmPending = false;
+        if (ok) {
+          startCleaning();
+        } else {
+          $('start-btn').disabled = false;
+        }
+      }).catch(function (err) {
+        state.confirmPending = false;
+        $('start-btn').disabled = false;
+        showAlert($('start-error-alert'), i18n.t('start.failed', { error: err.message || err }));
+      });
+    });
 
     function cancelCleaning() {
       var btn = $('cancel-btn');
